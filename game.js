@@ -28,10 +28,10 @@ const player = {
     facing: 'right', // Направление взгляда
     currentSpellIndex: 0,
     spells: [
-        { name: "Огненный шар", damage: 1000//20, color: "orange", speed: 10//8, size: 10, hasGravity: true },
+        { name: "Огненный шар", damage: 20, color: "orange", speed: 8, size: 10, hasGravity: true },
         { name: "Ледяная стрела", damage: 15, color: "lightblue", speed: 10, size: 8, hasGravity: false },
         { name: "Каменная пуля", damage: 25, color: "gray", speed: 7, size: 12, hasGravity: true },
-        { name: "Электрический разряд", damage: 100//10, color: "yellow", speed: 14//12, size: 6, hasGravity: false }
+        { name: "Электрический разряд", damage: 10, color: "yellow", speed: 12, size: 6, hasGravity: false }
     ]
 };
 
