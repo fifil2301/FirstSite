@@ -153,6 +153,7 @@
         let minesFlagged = 0;
         let cellsRevealed = 0;
         let gameOver = false;
+        let firstClick = true; // Новый флаг для отслеживания первого клика
 
         // Инициализация игры
         function initializeGame() {
@@ -161,6 +162,7 @@
             minesFlagged = 0;
             cellsRevealed = 0;
             gameOver = false;
+            firstClick = true; // Сбрасываем флаг при новой игре
             messageDisplay.textContent = '';
             messageDisplay.className = 'message'; // Сброс классов сообщения
 
@@ -168,11 +170,13 @@
             timerDisplay.textContent = `Время: 0`;
 
             clearInterval(timerInterval);
-            timerInterval = setInterval(updateTimer, 1000);
+            // Таймер запускается только после первого хода
+            // timerInterval = setInterval(updateTimer, 1000); 
 
             createBoard();
-            placeMines();
-            calculateNumbers();
+            // Мины размещаются только после первого хода
+            // placeMines(); 
+            // calculateNumbers(); // Числа тоже после размещения мин
             renderBoard();
         }
 
@@ -192,13 +196,15 @@
         }
 
         // Размещение мин
-        function placeMines() {
+        function placeMines(firstClickRow, firstClickCol) {
             let minesPlaced = 0;
             while (minesPlaced < NUM_MINES) {
                 const r = Math.floor(Math.random() * BOARD_SIZE);
                 const c = Math.floor(Math.random() * BOARD_SIZE);
 
-                if (!board[r][c].isMine) {
+                // Убеждаемся, что мина не ставится на ячейку первого клика
+                // и не ставится на уже существующую мину
+                if (!board[r][c].isMine && !(r === firstClickRow && c === firstClickCol)) {
                     board[r][c].isMine = true;
                     minesPlaced++;
                 }
@@ -209,6 +215,8 @@
         function calculateNumbers() {
             for (let r = 0; r < BOARD_SIZE; r++) {
                 for (let c = 0; c < BOARD_SIZE; c++) {
+                    // Сбрасываем minesAround для пересчета
+                    board[r][c].minesAround = 0; 
                     if (!board[r][c].isMine) {
                         let count = 0;
                         // Проверяем 8 соседних ячеек
@@ -277,6 +285,27 @@
 
             if (cellData.isRevealed || cellData.isFlagged) return;
 
+            // Логика для первого клика
+            if (firstClick) {
+                firstClick = false;
+                // Запускаем таймер
+                timerInterval = setInterval(updateTimer, 1000);
+
+                // Размещаем мины, исключая ячейку первого клика
+                placeMines(r, c);
+                // Пересчитываем числа
+                calculateNumbers();
+
+                // Если вдруг под первым кликом оказалась мина (что не должно произойти с новой логикой, но для подстраховки)
+                // или если мина была перемещена, то пересчитываем и открываем
+                if (board[r][c].isMine) {
+                    // Этого блока по идее быть не должно, если placeMines работает корректно
+                    // Но если вдруг, то можно было бы переместить мину и пересчитать
+                    // Для текущей логики, placeMines уже гарантирует отсутствие мины под первым кликом
+                }
+            }
+
+            // Теперь, после первого клика, можно обрабатывать как обычно
             if (cellData.isMine) {
                 revealAllMines();
                 endGame(false); // Проигрыш
@@ -346,6 +375,7 @@
             const totalCells = BOARD_SIZE * BOARD_SIZE;
             const nonMineCells = totalCells - NUM_MINES;
 
+            // Проверяем, все ли не-миновые ячейки открыты
             if (cellsRevealed === nonMineCells) {
                 endGame(true); // Победа
             }
