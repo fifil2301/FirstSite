@@ -27,14 +27,16 @@ const player = {
     facing: 'right', // Направление взгляда
     currentSpellIndex: 0,
     spells: [
-        { name: "Огненный шар", damage: 20, color: "orange", speed: 8, size: 10 },
-        { name: "Ледяная стрела", damage: 15, color: "lightblue", speed: 10, size: 8 },
-        { name: "Каменная пуля", damage: 25, color: "gray", speed: 7, size: 12 }
+        { name: "Огненный шар", damage: 20, color: "orange", speed: 8, size: 10, hasGravity: true },
+        { name: "Ледяная стрела", damage: 15, color: "lightblue", speed: 10, size: 8, hasGravity: false },
+        { name: "Каменная пуля", damage: 25, color: "gray", speed: 7, size: 12, hasGravity: true }
     ]
 };
 
-// Снаряды (заклинания)
-const projectiles = [];
+// Снаряды (заклинания игрока)
+const playerProjectiles = [];
+// Снаряды врагов
+const enemyProjectiles = [];
 
 // Враги
 const enemies = [];
@@ -94,9 +96,9 @@ function drawPlayer() {
     ctx.fillRect(player.x + (player.facing === 'right' ? player.width - 5 : 0), player.y + player.height / 4, 5, player.height / 2);
 }
 
-function drawProjectiles() {
-    projectiles.forEach(p => {
-        ctx.fillStyle = p.color;
+function drawProjectiles(projectilesArray, color) {
+    projectilesArray.forEach(p => {
+        ctx.fillStyle = color || p.color; // Используем цвет снаряда или переданный цвет
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
         ctx.fill();
@@ -169,7 +171,7 @@ function updatePlayer() {
     } else {
         player.isGrounded = false;
     }
-
+    
     // Обновление направления
     if (player.dx > 0) player.facing = 'right';
     else if (player.dx < 0) player.facing = 'left';
@@ -225,16 +227,21 @@ function handlePlayerMapCollision() {
     }
 }
 
+function updateProjectiles(projectilesArray, isEnemyProjectile = false) {
+    for (let i = projectilesArray.length - 1; i >= 0; i--) {
+        const p = projectilesArray[i];
 
-function updateProjectiles() {
-    for (let i = projectiles.length - 1; i >= 0; i--) {
-        const p = projectiles[i];
+        // Применяем гравитацию, если снаряд имеет свойство hasGravity
+        if (p.hasGravity) {
+            p.dy += GRAVITY / 2; // Гравитация для снарядов может быть меньше
+        }
+
         p.x += p.dx;
         p.y += p.dy;
 
         // Удаление снаряда, если он вышел за пределы экрана
-        if (p.x < 0 || p.x > CANVAS_WIDTH || p.y < 0 || p.y > CANVAS_HEIGHT) {
-            projectiles.splice(i, 1);
+        if (p.x < -p.size || p.x > CANVAS_WIDTH + p.size || p.y < -p.size || p.y > CANVAS_HEIGHT + p.size) {
+            projectilesArray.splice(i, 1);
             continue;
         }
 
@@ -245,29 +252,42 @@ function updateProjectiles() {
         if (tileRow >= 0 && tileRow < gameMap.length && tileCol >= 0 && tileCol < gameMap[0].length) {
             const tileType = gameMap[tileRow][tileCol];
             if (tileType === 1) { // Столкновение с неразрушимым блоком
-                projectiles.splice(i, 1);
+                projectilesArray.splice(i, 1);
                 continue;
             } else if (tileType === 2) { // Столкновение с разрушаемым блоком
                 gameMap[tileRow][tileCol] = 0; // Разрушаем блок
-                projectiles.splice(i, 1);
+                projectilesArray.splice(i, 1);
                 continue;
             }
         }
 
-        // Коллизии снаряда с врагами
-        for (let j = enemies.length - 1; j >= 0; j--) {
-            const enemy = enemies[j];
-            if (p.x < enemy.x + enemy.width &&
-                p.x + p.size > enemy.x &&
-                p.y < enemy.y + enemy.height &&
-                p.y + p.size > enemy.y) {
-                // Столкновение!
-                enemy.health -= p.damage;
-                projectiles.splice(i, 1); // Удаляем снаряд
-                if (enemy.health <= 0) {
-                    enemies.splice(j, 1); // Удаляем врага
+        // Коллизии снаряда с игроком (если это вражеский снаряд)
+        if (isEnemyProjectile) {
+            if (p.x < player.x + player.width &&
+                p.x + p.size > player.x &&
+                p.y < player.y + player.height &&
+                p.y + p.size > player.y) {
+                // Столкновение с игроком!
+                player.health -= p.damage;
+                projectilesArray.splice(i, 1); // Удаляем снаряд
+                continue; // Переходим к следующему снаряду
+            }
+        } else { // Если это снаряд игрока
+            // Коллизии снаряда игрока с врагами
+            for (let j = enemies.length - 1; j >= 0; j--) {
+                const enemy = enemies[j];
+                if (p.x < enemy.x + enemy.width &&
+                    p.x + p.size > enemy.x &&
+                    p.y < enemy.y + enemy.height &&
+                    p.y + p.size > enemy.y) {
+                    // Столкновение!
+                    enemy.health -= p.damage;
+                    projectilesArray.splice(i, 1); // Удаляем снаряд
+                    if (enemy.health <= 0) {
+                        enemies.splice(j, 1); // Удаляем врага
+                    }
+                    break; // Выходим из внутреннего цикла, так как снаряд уже удален
                 }
-                break; // Выходим из внутреннего цикла, так как снаряд уже удален
             }
         }
     }
@@ -288,6 +308,22 @@ function updateEnemies() {
             enemy.dx *= -1; // Меняем направление
         }
 
+        // Простая логика атаки врага (стрельба в игрока)
+        if (Math.random() < 0.005) { // Шанс выстрела (можно настроить)
+            const angle = Math.atan2(player.y + player.height / 2 - (enemy.y + enemy.height / 2), player.x + player.width / 2 - (enemy.x + enemy.width / 2));
+            const speed = 5;
+            enemyProjectiles.push({
+                x: enemy.x + enemy.width / 2,
+                y: enemy.y + enemy.height / 2,
+                dx: Math.cos(angle) * speed,
+                dy: Math.sin(angle) * speed,
+                damage: 10, // Урон от вражеского снаряда
+                color: 'red', // Цвет вражеского снаряда
+                size: 6,
+                hasGravity: false // Вражеские снаряды пока без гравитации для простоты
+            });
+        }
+
         // Коллизия врага с игроком (простой урон)
         if (player.x < enemy.x + enemy.width &&
             player.x + player.width > enemy.x &&
@@ -306,6 +342,11 @@ document.addEventListener('keydown', (e) => {
     if (e.code === 'Digit1') player.currentSpellIndex = 0;
     if (e.code === 'Digit2') player.currentSpellIndex = 1;
     if (e.code === 'Digit3') player.currentSpellIndex = 2;
+    
+    // Переключение заклинаний по 'T'
+    if (e.code === 'KeyT') {
+        player.currentSpellIndex = (player.currentSpellIndex + 1) % player.spells.length;
+    }
 });
 
 document.addEventListener('keyup', (e) => {
@@ -323,14 +364,15 @@ canvas.addEventListener('mousedown', (e) => {
         const dx = Math.cos(angle) * spell.speed;
         const dy = Math.sin(angle) * spell.speed;
 
-        projectiles.push({
+        playerProjectiles.push({
             x: player.x + player.width / 2,
             y: player.y + player.height / 2,
             dx: dx,
             dy: dy,
             damage: spell.damage,
             color: spell.color,
-            size: spell.size
+            size: spell.size,
+            hasGravity: spell.hasGravity // Передаем свойство гравитации снаряду
         });
     }
 });
@@ -353,7 +395,8 @@ function gameLoop() {
 
     // Обновление логики
     updatePlayer();
-    updateProjectiles();
+    updateProjectiles(playerProjectiles, false); // Снаряды игрока
+    updateProjectiles(enemyProjectiles, true);  // Снаряды врагов
     updateEnemies();
 
     // Очистка канваса
@@ -362,7 +405,8 @@ function gameLoop() {
     // Отрисовка
     drawMap();
     drawPlayer();
-    drawProjectiles();
+    drawProjectiles(playerProjectiles); // Отрисовка снарядов игрока
+    drawProjectiles(enemyProjectiles); // Отрисовка снарядов врагов
     drawEnemies();
     updateUI();
 
