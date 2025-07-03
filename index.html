@@ -3,22 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cut the Rope - Heck.ai Edition</title>
+    <title>Noita Lite</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div id="game-container">
-        <h1>Cut the Rope</h1>
         <canvas id="gameCanvas"></canvas>
-        <div id="level-info">
-            Уровень: <span id="current-level">1</span> | Звезды: <span id="stars-collected">0</span>
-        </div>
-        <div id="game-controls">
-            <button id="restart-button">Перезапустить уровень</button>
-            <button id="next-level-button" style="display: none;">Следующий уровень</button>
-        </div>
-        <div id="game-messages">
-            <!-- Сообщения о победе/поражении -->
+        <div id="game-ui">
+            <div id="health-bar">Здоровье: <span id="player-health">100</span></div>
+            <div id="spell-info">Текущее заклинание: <span id="current-spell">Огненный шар</span></div>
         </div>
     </div>
 
