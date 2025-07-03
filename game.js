@@ -23,13 +23,15 @@ const player = {
     dx: 0, // Горизонтальное движение
     dy: 0, // Вертикальное движение (для гравитации/прыжка)
     health: 100,
+    maxHealth: 100,
     isGrounded: false,
     facing: 'right', // Направление взгляда
     currentSpellIndex: 0,
     spells: [
         { name: "Огненный шар", damage: 20, color: "orange", speed: 8, size: 10, hasGravity: true },
         { name: "Ледяная стрела", damage: 15, color: "lightblue", speed: 10, size: 8, hasGravity: false },
-        { name: "Каменная пуля", damage: 25, color: "gray", speed: 7, size: 12, hasGravity: true }
+        { name: "Каменная пуля", damage: 25, color: "gray", speed: 7, size: 12, hasGravity: true },
+        { name: "Электрический разряд", damage: 10, color: "yellow", speed: 12, size: 6, hasGravity: false }
     ]
 };
 
@@ -40,13 +42,15 @@ const enemyProjectiles = [];
 
 // Враги
 const enemies = [];
+let boss = null; // Босс будет отдельным объектом
 
 // Карта (первая локация)
 // 0: Воздух/Пустота
 // 1: Земля/Камень (неразрушимый)
 // 2: Разрушаемый блок (например, мягкая порода)
 // 3: Враг (стартовая позиция)
-// 4: Игрок (стартовая позиция)
+// 4: Игрок (стартовая позиция) - не используется, игрок спавнится по координатам
+// 5: Босс (стартовая позиция) - не используется, босс спавнится динамически
 const gameMap = [
     [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
     [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
@@ -69,15 +73,76 @@ const gameMap = [
     [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
     [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
 ];
-// Добавим несколько разрушаемых блоков и врагов
-gameMap[17][5] = 2;
-gameMap[17][6] = 2;
-gameMap[17][7] = 2;
-gameMap[17][15] = 2;
-gameMap[17][16] = 2;
-gameMap[17][17] = 2;
-gameMap[18][10] = 3; // Враг
-gameMap[18][14] = 3; // Враг
+
+// --- Генерация более сложной пещеры ---
+function generateCaveMap() {
+    const rows = gameMap.length;
+    const cols = gameMap[0].length;
+
+    // Заполняем все воздухом, кроме границ
+    for (let r = 1; r < rows - 1; r++) {
+        for (let c = 1; c < cols - 1; c++) {
+            gameMap[r][c] = 0;
+        }
+    }
+
+    // Создаем несколько "комнат" и соединяем их
+    const numRooms = 5;
+    const rooms = [];
+    for (let i = 0; i < numRooms; i++) {
+        const roomWidth = Math.floor(Math.random() * 5) + 5; // 5-9
+        const roomHeight = Math.floor(Math.random() * 3) + 3; // 3-5
+        const roomX = Math.floor(Math.random() * (cols - roomWidth - 2)) + 1;
+        const roomY = Math.floor(Math.random() * (rows - roomHeight - 2)) + 1;
+
+        rooms.push({ x: roomX, y: roomY, width: roomWidth, height: roomHeight });
+
+        for (let r = roomY; r < roomY + roomHeight; r++) {
+            for (let c = roomX; c < roomX + roomWidth; c++) {
+                if (r >= 0 && r < rows && c >= 0 && c < cols) {
+                    gameMap[r][c] = 2; // Разрушаемый блок
+                }
+            }
+        }
+    }
+
+    // Соединяем комнаты "коридорами"
+    for (let i = 0; i < rooms.length - 1; i++) {
+        const r1 = rooms[i];
+        const r2 = rooms[i + 1];
+
+        // Горизонтальный коридор
+        const startX = Math.min(r1.x + Math.floor(r1.width / 2), r2.x + Math.floor(r2.width / 2));
+        const endX = Math.max(r1.x + Math.floor(r1.width / 2), r2.x + Math.floor(r2.width / 2));
+        const corridorY = r1.y + Math.floor(r1.height / 2);
+        for (let x = startX; x <= endX; x++) {
+            if (corridorY >= 0 && corridorY < rows && x >= 0 && x < cols) {
+                gameMap[corridorY][x] = 0;
+                if (corridorY + 1 < rows) gameMap[corridorY + 1][x] = 0; // Делаем коридор 2 клетки в высоту
+            }
+        }
+
+        // Вертикальный коридор
+        const startY = Math.min(r1.y + Math.floor(r1.height / 2), r2.y + Math.floor(r2.height / 2));
+        const endY = Math.max(r1.y + Math.floor(r1.height / 2), r2.y + Math.floor(r2.height / 2));
+        const corridorX = r2.x + Math.floor(r2.width / 2);
+        for (let y = startY; y <= endY; y++) {
+            if (y >= 0 && y < rows && corridorX >= 0 && corridorX < cols) {
+                gameMap[y][corridorX] = 0;
+                if (corridorX + 1 < cols) gameMap[y][corridorX + 1] = 0; // Делаем коридор 2 клетки в ширину
+            }
+        }
+    }
+
+    // Добавляем случайные разрушаемые блоки для "шума"
+    for (let r = 1; r < rows - 1; r++) {
+        for (let c = 1; c < cols - 1; c++) {
+            if (gameMap[r][c] === 0 && Math.random() < 0.15) { // 15% шанс на разрушаемый блок в пустом пространстве
+                gameMap[r][c] = 2;
+            }
+        }
+    }
+}
 
 // --- Константы игры ---
 const GRAVITY = 0.5;
@@ -107,7 +172,7 @@ function drawProjectiles(projectilesArray, color) {
 
 function drawEnemies() {
     enemies.forEach(enemy => {
-        ctx.fillStyle = 'purple'; // Враг
+        ctx.fillStyle = enemy.color; // Цвет врага
         ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height);
         // Простая индикация здоровья врага
         ctx.fillStyle = 'red';
@@ -115,6 +180,20 @@ function drawEnemies() {
         ctx.fillStyle = 'green';
         ctx.fillRect(enemy.x, enemy.y - 10, enemy.width * (enemy.health / enemy.maxHealth), 5);
     });
+
+    if (boss) {
+        ctx.fillStyle = boss.color; // Цвет босса
+        ctx.fillRect(boss.x, boss.y, boss.width, boss.height);
+        // Индикация здоровья босса
+        ctx.fillStyle = 'red';
+        ctx.fillRect(boss.x, boss.y - 15, boss.width, 8);
+        ctx.fillStyle = 'green';
+        ctx.fillRect(boss.x, boss.y - 15, boss.width * (boss.health / boss.maxHealth), 8);
+        ctx.font = '12px Arial';
+        ctx.fillStyle = 'white';
+        ctx.textAlign = 'center';
+        ctx.fillText('БОСС', boss.x + boss.width / 2, boss.y - 20);
+    }
 }
 
 function drawMap() {
@@ -289,38 +368,68 @@ function updateProjectiles(projectilesArray, isEnemyProjectile = false) {
                     break; // Выходим из внутреннего цикла, так как снаряд уже удален
                 }
             }
+            // Коллизии снаряда игрока с боссом
+            if (boss) {
+                if (p.x < boss.x + boss.width &&
+                    p.x + p.size > boss.x &&
+                    p.y < boss.y + boss.height &&
+                    p.y + p.size > boss.y) {
+                    boss.health -= p.damage;
+                    projectilesArray.splice(i, 1);
+                    if (boss.health <= 0) {
+                        alert('БОСС ПОБЕЖДЕН! ВЫ ВЫИГРАЛИ!');
+                        location.reload(); // Перезагружаем игру
+                    }
+                    break;
+                }
+            }
         }
     }
 }
 
 function updateEnemies() {
     enemies.forEach(enemy => {
-        // Простая логика движения врагов: просто двигаются влево/вправо
-        enemy.x += enemy.dx;
+        // Простая логика движения врагов:
+        // Если игрок близко, преследуем, иначе - патрулируем.
+        const distanceToPlayer = Math.sqrt(Math.pow(player.x - enemy.x, 2) + Math.pow(player.y - enemy.y, 2));
+        const chaseDistance = 200; // Расстояние, на котором враг начинает преследовать
 
-        // Проверка на столкновение с краями платформы или другими блоками
-        const nextX = enemy.x + enemy.dx;
-        const nextTileCol = Math.floor((nextX + (enemy.dx > 0 ? enemy.width : 0)) / TILE_SIZE);
-        const nextTileRow = Math.floor((enemy.y + enemy.height + 1) / TILE_SIZE); // Проверяем плитку под врагом
+        if (distanceToPlayer < chaseDistance) {
+            // Преследование игрока
+            if (player.x < enemy.x) {
+                enemy.dx = -enemy.speed;
+            } else if (player.x > enemy.x) {
+                enemy.dx = enemy.speed;
+            } else {
+                enemy.dx = 0;
+            }
+        } else {
+            // Патрулирование (движение влево/вправо)
+            const nextX = enemy.x + enemy.dx;
+            const nextTileCol = Math.floor((nextX + (enemy.dx > 0 ? enemy.width : 0)) / TILE_SIZE);
+            const nextTileRow = Math.floor((enemy.y + enemy.height + 1) / TILE_SIZE); // Проверяем плитку под врагом
 
-        if (nextTileRow >= gameMap.length || nextTileCol < 0 || nextTileCol >= gameMap[0].length ||
-            gameMap[nextTileRow][nextTileCol] === 0) { // Если под врагом пусто или он упрется в стену
-            enemy.dx *= -1; // Меняем направление
+            if (nextTileRow >= gameMap.length || nextTileCol < 0 || nextTileCol >= gameMap[0].length ||
+                gameMap[nextTileRow][nextTileCol] === 0) { // Если под врагом пусто или он упрется в стену
+                enemy.dx *= -1; // Меняем направление
+            }
         }
 
+        enemy.x += enemy.dx;
+
         // Простая логика атаки врага (стрельба в игрока)
-        if (Math.random() < 0.005) { // Шанс выстрела (можно настроить)
+        if (Math.random() < enemy.fireRate) { // Шанс выстрела (можно настроить)
             const angle = Math.atan2(player.y + player.height / 2 - (enemy.y + enemy.height / 2), player.x + player.width / 2 - (enemy.x + enemy.width / 2));
-            const speed = 5;
+            
             enemyProjectiles.push({
                 x: enemy.x + enemy.width / 2,
                 y: enemy.y + enemy.height / 2,
-                dx: Math.cos(angle) * speed,
-                dy: Math.sin(angle) * speed,
-                damage: 10, // Урон от вражеского снаряда
-                color: 'red', // Цвет вражеского снаряда
-                size: 6,
-                hasGravity: false // Вражеские снаряды пока без гравитации для простоты
+                dx: Math.cos(angle) * enemy.projectileSpeed,
+                dy: Math.sin(angle) * enemy.projectileSpeed,
+                damage: enemy.projectileDamage,
+                color: enemy.projectileColor,
+                size: enemy.projectileSize,
+                hasGravity: enemy.projectileHasGravity
             });
         }
 
@@ -329,20 +438,72 @@ function updateEnemies() {
             player.x + player.width > enemy.x &&
             player.y < enemy.y + enemy.height &&
             player.y + player.height > enemy.y) {
-            player.health -= 0.5; // Небольшой постоянный урон при контакте
+            player.health -= enemy.contactDamage; // Небольшой постоянный урон при контакте
         }
     });
 }
+
+function updateBoss() {
+    if (!boss) return;
+
+    // Босс тоже подвержен гравитации
+    boss.dy += GRAVITY;
+    boss.y += boss.dy;
+
+    // Простая коллизия с полом для босса
+    if (boss.y + boss.height > CANVAS_HEIGHT) {
+        boss.y = CANVAS_HEIGHT - boss.height;
+        boss.dy = 0;
+    }
+
+    // Босс всегда преследует игрока
+    if (player.x < boss.x) {
+        boss.dx = -boss.speed;
+    } else if (player.x > boss.x) {
+        boss.dx = boss.speed;
+    } else {
+        boss.dx = 0;
+    }
+    boss.x += boss.dx;
+
+    // Ограничение по краям канваса для босса
+    if (boss.x < 0) boss.x = 0;
+    if (boss.x + boss.width > CANVAS_WIDTH) boss.x = CANVAS_WIDTH - boss.width;
+
+    // Логика атаки босса (более частая и, возможно, несколько снарядов)
+    if (Math.random() < boss.fireRate) {
+        // Пример: босс стреляет 3 снарядами веером
+        for (let i = -1; i <= 1; i++) {
+            const angleOffset = i * 0.2; // Небольшое смещение угла
+            const angle = Math.atan2(player.y + player.height / 2 - (boss.y + boss.height / 2), player.x + player.width / 2 - (boss.x + boss.width / 2)) + angleOffset;
+            
+            enemyProjectiles.push({
+                x: boss.x + boss.width / 2,
+                y: boss.y + boss.height / 2,
+                dx: Math.cos(angle) * boss.projectileSpeed,
+                dy: Math.sin(angle) * boss.projectileSpeed,
+                damage: boss.projectileDamage,
+                color: boss.projectileColor,
+                size: boss.projectileSize,
+                hasGravity: boss.projectileHasGravity
+            });
+        }
+    }
+
+    // Коллизия босса с игроком (больший урон)
+    if (player.x < boss.x + boss.width &&
+        player.x + player.width > boss.x &&
+        player.y < boss.y + boss.height &&
+        player.y + player.height > boss.y) {
+        player.health -= boss.contactDamage;
+    }
+}
+
 
 // --- Обработчики событий ---
 
 document.addEventListener('keydown', (e) => {
     keys[e.code] = true;
-    // Переключение заклинаний
-    if (e.code === 'Digit1') player.currentSpellIndex = 0;
-    if (e.code === 'Digit2') player.currentSpellIndex = 1;
-    if (e.code === 'Digit3') player.currentSpellIndex = 2;
-    
     // Переключение заклинаний по 'T'
     if (e.code === 'KeyT') {
         player.currentSpellIndex = (player.currentSpellIndex + 1) % player.spells.length;
@@ -398,6 +559,7 @@ function gameLoop() {
     updateProjectiles(playerProjectiles, false); // Снаряды игрока
     updateProjectiles(enemyProjectiles, true);  // Снаряды врагов
     updateEnemies();
+    updateBoss(); // Обновляем босса
 
     // Очистка канваса
     ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
@@ -407,40 +569,84 @@ function gameLoop() {
     drawPlayer();
     drawProjectiles(playerProjectiles); // Отрисовка снарядов игрока
     drawProjectiles(enemyProjectiles); // Отрисовка снарядов врагов
-    drawEnemies();
+    drawEnemies(); // Отрисовка врагов и босса
+
     updateUI();
 
     // Проверка на конец игры
     if (player.health <= 0) {
         alert('Вы погибли! Игра окончена.');
-        // Можно перезагрузить игру или показать экран "Game Over"
-        location.reload();
+        location.reload(); // Перезагружаем игру
         return; // Останавливаем цикл
+    }
+
+    // Проверка на появление босса
+    if (enemies.length === 0 && !boss) {
+        spawnBoss();
     }
 
     requestAnimationFrame(gameLoop);
 }
 
 // --- Инициализация врагов на основе карты ---
-function initializeEnemiesFromMap() {
-    for (let row = 0; row < gameMap.length; row++) {
-        for (let col = 0; col < gameMap[row].length; col++) {
-            if (gameMap[row][col] === 3) { // Если это стартовая позиция врага
+function initializeEnemies() {
+    const numEnemies = Math.floor(Math.random() * 5) + 3; // 3-7 врагов
+    for (let i = 0; i < numEnemies; i++) {
+        let placed = false;
+        while (!placed) {
+            const randCol = Math.floor(Math.random() * (gameMap[0].length - 2)) + 1;
+            const randRow = Math.floor(Math.random() * (gameMap.length - 5)) + 1; // Избегаем спавна слишком низко
+
+            // Проверяем, что место пустое и есть земля под ним
+            if (gameMap[randRow][randCol] === 0 && gameMap[randRow + 1][randCol] !== 0) {
                 enemies.push({
-                    x: col * TILE_SIZE,
-                    y: row * TILE_SIZE,
+                    x: randCol * TILE_SIZE,
+                    y: randRow * TILE_SIZE,
                     width: TILE_SIZE,
                     height: TILE_SIZE,
                     health: 50,
                     maxHealth: 50,
-                    dx: 1 // Начальное движение вправо
+                    dx: (Math.random() < 0.5 ? 1 : -1) * 1, // Начальное движение
+                    speed: 1, // Скорость движения врага
+                    color: 'purple',
+                    fireRate: 0.005, // Шанс выстрела за кадр
+                    projectileDamage: 10,
+                    projectileColor: 'red',
+                    projectileSize: 6,
+                    projectileSpeed: 5,
+                    projectileHasGravity: false,
+                    contactDamage: 0.5 // Урон при контакте
                 });
-                gameMap[row][col] = 0; // Удаляем маркер врага с карты, чтобы он не был нарисован как блок
+                placed = true;
             }
         }
     }
 }
 
+function spawnBoss() {
+    console.log('Все враги уничтожены! Появляется босс!');
+    boss = {
+        x: CANVAS_WIDTH / 2 - TILE_SIZE * 2, // Центр экрана
+        y: CANVAS_HEIGHT / 2 - TILE_SIZE * 2,
+        width: TILE_SIZE * 4, // Большой размер
+        height: TILE_SIZE * 4,
+        health: 500, // Много здоровья
+        maxHealth: 500,
+        dx: 0,
+        dy: 0,
+        speed: 2, // Медленнее, но мощнее
+        color: 'darkred',
+        fireRate: 0.02, // Чаще стреляет
+        projectileDamage: 20, // Больше урона
+        projectileColor: 'darkorange',
+        projectileSize: 15,
+        projectileSpeed: 7,
+        projectileHasGravity: true, // Снаряды босса могут иметь гравитацию
+        contactDamage: 2 // Большой урон при контакте
+    };
+}
+
 // Запускаем игру
-initializeEnemiesFromMap();
+generateCaveMap(); // Генерируем карту
+initializeEnemies(); // Инициализируем врагов
 gameLoop();
