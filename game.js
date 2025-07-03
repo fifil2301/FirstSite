@@ -1,367 +1,402 @@
-// game.js
-
-// 1. Инициализация Canvas и контекста
+// --- Инициализация ---
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
-// Установим размеры Canvas (можно сделать динамическими)
-canvas.width = 800;
-canvas.height = 600;
+// Размеры канваса (можно настроить)
+const CANVAS_WIDTH = 800;
+const CANVAS_HEIGHT = 600;
+canvas.width = CANVAS_WIDTH;
+canvas.height = CANVAS_HEIGHT;
 
-// 2. Переменные состояния игры
-let currentLevel = 1;
-let starsCollected = 0;
-let gameRunning = false;
-let gameWon = false;
-let gameLost = false;
+// Размеры плиток (для пиксельной графики)
+const TILE_SIZE = 32;
 
-// 3. Объекты игры (конфета, веревки, звезды, Ам Ням)
-// Для каждого объекта нужно будет определить его свойства:
-// - Позиция (x, y)
-// - Размеры (width, height / radius)
-// - Изображение (если есть)
-// - Физические свойства (масса, трение, упругость - если используем физ. движок)
+// --- Игровые объекты ---
 
-let candy = { x: 0, y: 0, radius: 20, image: new Image() /* загрузить изображение конфеты */ };
-let ropes = []; // Массив объектов веревок: [{ start: {x,y}, end: {x,y}, attachedToCandy: true, cut: false }]
-let stars = []; // Массив объектов звезд: [{ x, y, radius, collected: false, image }]
-let omNom = { x: 0, y: 0, width: 60, height: 60, image: new Image() /* загрузить изображение Ам Няма */ };
+// Игрок
+const player = {
+    x: CANVAS_WIDTH / 2 - TILE_SIZE / 2,
+    y: CANVAS_HEIGHT - TILE_SIZE * 3, // Начинаем чуть выше дна
+    width: TILE_SIZE,
+    height: TILE_SIZE,
+    speed: 5,
+    dx: 0, // Горизонтальное движение
+    dy: 0, // Вертикальное движение (для гравитации/прыжка)
+    health: 100,
+    isGrounded: false,
+    facing: 'right', // Направление взгляда
+    currentSpellIndex: 0,
+    spells: [
+        { name: "Огненный шар", damage: 20, color: "orange", speed: 8, size: 10 },
+        { name: "Ледяная стрела", damage: 15, color: "lightblue", speed: 10, size: 8 },
+        { name: "Каменная пуля", damage: 25, color: "gray", speed: 7, size: 12 }
+    ]
+};
 
-// 4. Загрузка изображений (асинхронно)
-function loadImages() {
-    // Пример:
-    candy.image.src = 'images/candy.png';
-    omNom.image.src = 'images/omnom.png';
-    // ... загрузить изображения звезд, фона, веревок и т.д.
+// Снаряды (заклинания)
+const projectiles = [];
 
-    // Убедиться, что все изображения загружены, прежде чем начать игру
-    // Можно использовать Promise.all или счетчик загруженных изображений
-}
+// Враги
+const enemies = [];
 
-// 5. Определение уровней
-// Массив объектов, каждый из которых описывает уровень
-const levels = [
-    // Уровень 1 (простой)
-    {
-        candyStart: { x: 100, y: 50 },
-        ropes: [
-            { start: { x: 100, y: 0 }, end: { x: 100, y: 50 } } // Веревка от точки (100,0) до конфеты
-        ],
-        stars: [
-            { x: 200, y: 200 },
-            { x: 300, y: 300 }
-        ],
-        omNomTarget: { x: 700, y: 500 }
-    },
-    // Уровень 2 (сложнее)
-    {
-        candyStart: { x: 400, y: 50 },
-        ropes: [
-            { start: { x: 350, y: 0 }, end: { x: 400, y: 50 } },
-            { start: { x: 450, y: 0 }, end: { x: 400, y: 50 } }
-        ],
-        stars: [
-            { x: 200, y: 400 },
-            { x: 600, y: 400 },
-            { x: 400, y: 250 }
-        ],
-        omNomTarget: { x: 100, y: 500 }
-    },
-    // ... 8 других уровней с возрастающей сложностью
-    // Добавляйте интерактивные элементы:
-    // - bubbles: [{x,y,radius}] - пузыри, которые поднимают конфету
-    // - airPuffs: [{x,y,direction,strength}] - воздушные потоки
-    // - spikes: [{x,y,width,height}] - шипы
-    // - spiders: [{x,y,path}] - пауки, которые движутся и могут съесть конфету
+// Карта (первая локация)
+// 0: Воздух/Пустота
+// 1: Земля/Камень (неразрушимый)
+// 2: Разрушаемый блок (например, мягкая порода)
+// 3: Враг (стартовая позиция)
+// 4: Игрок (стартовая позиция)
+const gameMap = [
+    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
 ];
+// Добавим несколько разрушаемых блоков и врагов
+gameMap[17][5] = 2;
+gameMap[17][6] = 2;
+gameMap[17][7] = 2;
+gameMap[17][15] = 2;
+gameMap[17][16] = 2;
+gameMap[17][17] = 2;
+gameMap[18][10] = 3; // Враг
+gameMap[18][14] = 3; // Враг
 
-// 6. Функция инициализации уровня
-function initLevel(levelNum) {
-    const levelData = levels[levelNum - 1];
-    if (!levelData) {
-        // Все уровни пройдены!
-        displayMessage("Поздравляем! Вы прошли все уровни!", "green");
-        gameRunning = false;
-        document.getElementById('next-level-button').style.display = 'none';
-        return;
+// --- Константы игры ---
+const GRAVITY = 0.5;
+const JUMP_STRENGTH = -10; // Отрицательное значение для движения вверх
+
+// --- Состояние ввода ---
+const keys = {};
+
+// --- Функции отрисовки ---
+
+function drawPlayer() {
+    ctx.fillStyle = 'white'; // Игрок
+    ctx.fillRect(player.x, player.y, player.width, player.height);
+    // Простая индикация направления
+    ctx.fillStyle = player.facing === 'right' ? 'blue' : 'red';
+    ctx.fillRect(player.x + (player.facing === 'right' ? player.width - 5 : 0), player.y + player.height / 4, 5, player.height / 2);
+}
+
+function drawProjectiles() {
+    projectiles.forEach(p => {
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+    });
+}
+
+function drawEnemies() {
+    enemies.forEach(enemy => {
+        ctx.fillStyle = 'purple'; // Враг
+        ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height);
+        // Простая индикация здоровья врага
+        ctx.fillStyle = 'red';
+        ctx.fillRect(enemy.x, enemy.y - 10, enemy.width, 5);
+        ctx.fillStyle = 'green';
+        ctx.fillRect(enemy.x, enemy.y - 10, enemy.width * (enemy.health / enemy.maxHealth), 5);
+    });
+}
+
+function drawMap() {
+    for (let row = 0; row < gameMap.length; row++) {
+        for (let col = 0; col < gameMap[row].length; col++) {
+            const tileType = gameMap[row][col];
+            const x = col * TILE_SIZE;
+            const y = row * TILE_SIZE;
+
+            if (tileType === 1) { // Неразрушимый блок
+                ctx.fillStyle = '#555'; // Темно-серый
+                ctx.fillRect(x, y, TILE_SIZE, TILE_SIZE);
+                ctx.strokeStyle = '#333'; // Границы
+                ctx.strokeRect(x, y, TILE_SIZE, TILE_SIZE);
+            } else if (tileType === 2) { // Разрушаемый блок
+                ctx.fillStyle = '#8B4513'; // Коричневый (земля)
+                ctx.fillRect(x, y, TILE_SIZE, TILE_SIZE);
+                ctx.strokeStyle = '#652C0A';
+                ctx.strokeRect(x, y, TILE_SIZE, TILE_SIZE);
+            }
+            // Для 0 (воздух) ничего не рисуем
+        }
+    }
+}
+
+function updateUI() {
+    document.getElementById('player-health').textContent = Math.max(0, Math.floor(player.health));
+    document.getElementById('current-spell').textContent = player.spells[player.currentSpellIndex].name;
+}
+
+// --- Функции обновления логики ---
+
+function updatePlayer() {
+    // Применяем гравитацию
+    player.dy += GRAVITY;
+
+    // Горизонтальное движение
+    player.x += player.dx;
+
+    // Вертикальное движение
+    player.y += player.dy;
+
+    // Коллизии с картой
+    handlePlayerMapCollision();
+
+    // Ограничение по краям канваса (для простоты)
+    if (player.x < 0) player.x = 0;
+    if (player.x + player.width > CANVAS_WIDTH) player.x = CANVAS_WIDTH - player.width;
+    if (player.y < 0) player.y = 0;
+    if (player.y + player.height > CANVAS_HEIGHT) {
+        player.y = CANVAS_HEIGHT - player.height;
+        player.dy = 0;
+        player.isGrounded = true;
+    } else {
+        player.isGrounded = false;
     }
 
-    // Сброс состояния
-    starsCollected = 0;
-    gameWon = false;
-    gameLost = false;
-    gameRunning = true;
-    document.getElementById('next-level-button').style.display = 'none';
-    document.getElementById('game-messages').textContent = '';
-
-    // Установка начальных позиций и состояний объектов
-    candy.x = levelData.candyStart.x;
-    candy.y = levelData.candyStart.y;
-    // ... сбросить скорость конфеты, если используем физ. движок
-
-    ropes = levelData.ropes.map(r => ({ ...r, attachedToCandy: true, cut: false }));
-    stars = levelData.stars.map(s => ({ ...s, collected: false }));
-    omNom.x = levelData.omNomTarget.x;
-    omNom.y = levelData.omNomTarget.y;
-
-    // Обновить информацию на экране
-    document.getElementById('current-level').textContent = currentLevel;
-    document.getElementById('stars-collected').textContent = starsCollected;
-
-    // Если используем физ. движок, нужно создать/пересоздать тела и связи
-    // Например, Matter.js:
-    // Matter.World.clear(engine.world);
-    // Matter.Engine.clear(engine);
-    // Создать тело для конфеты, веревок, звезд, стен и т.д.
+    // Обновление направления
+    if (player.dx > 0) player.facing = 'right';
+    else if (player.dx < 0) player.facing = 'left';
 }
 
-// 7. Физический движок (Matter.js или p2.js)
-// Это будет самая сложная часть.
-// Пример с Matter.js (псевдокод):
-/*
-import { Engine, Render, World, Bodies, Constraint, Events } from 'matter-js';
+function handlePlayerMapCollision() {
+    const playerLeft = player.x;
+    const playerRight = player.x + player.width;
+    const playerTop = player.y;
+    const playerBottom = player.y + player.height;
 
-let engine;
-let render;
-let candyBody;
-let ropeConstraints = [];
+    // Проверяем только плитки, с которыми игрок может столкнуться
+    const startCol = Math.floor(playerLeft / TILE_SIZE);
+    const endCol = Math.ceil(playerRight / TILE_SIZE);
+    const startRow = Math.floor(playerTop / TILE_SIZE);
+    const endRow = Math.ceil(playerBottom / TILE_SIZE);
 
-function setupPhysics() {
-    engine = Engine.create();
-    render = Render.create({
-        element: document.body, // Или другой элемент
-        canvas: canvas,
-        engine: engine,
-        options: {
-            width: canvas.width,
-            height: canvas.height,
-            wireframes: false // Для отображения текстур
+    for (let row = startRow; row < endRow; row++) {
+        for (let col = startCol; col < endCol; col++) {
+            if (row < 0 || row >= gameMap.length || col < 0 || col >= gameMap[0].length) continue;
+
+            const tileType = gameMap[row][col];
+            if (tileType === 1 || tileType === 2) { // Столкновение с твердым блоком
+                const tileX = col * TILE_SIZE;
+                const tileY = row * TILE_SIZE;
+
+                // Простая обработка коллизий (без сложных отталкиваний)
+                // Если игрок пересекается с блоком
+                if (playerRight > tileX && playerLeft < tileX + TILE_SIZE &&
+                    playerBottom > tileY && playerTop < tileY + TILE_SIZE) {
+
+                    // Коллизия по Y
+                    if (player.dy > 0 && playerBottom - player.dy <= tileY) { // Падает на блок
+                        player.y = tileY - player.height;
+                        player.dy = 0;
+                        player.isGrounded = true;
+                    } else if (player.dy < 0 && playerTop - player.dy >= tileY + TILE_SIZE) { // Ударяется головой
+                        player.y = tileY + TILE_SIZE;
+                        player.dy = 0;
+                    }
+
+                    // Коллизия по X
+                    if (player.dx > 0 && playerRight - player.dx <= tileX) { // Движется вправо
+                        player.x = tileX - player.width;
+                        player.dx = 0;
+                    } else if (player.dx < 0 && playerLeft - player.dx >= tileX + TILE_SIZE) { // Движется влево
+                        player.x = tileX + TILE_SIZE;
+                        player.dx = 0;
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+function updateProjectiles() {
+    for (let i = projectiles.length - 1; i >= 0; i--) {
+        const p = projectiles[i];
+        p.x += p.dx;
+        p.y += p.dy;
+
+        // Удаление снаряда, если он вышел за пределы экрана
+        if (p.x < 0 || p.x > CANVAS_WIDTH || p.y < 0 || p.y > CANVAS_HEIGHT) {
+            projectiles.splice(i, 1);
+            continue;
+        }
+
+        // Коллизии снаряда с картой
+        const tileCol = Math.floor(p.x / TILE_SIZE);
+        const tileRow = Math.floor(p.y / TILE_SIZE);
+
+        if (tileRow >= 0 && tileRow < gameMap.length && tileCol >= 0 && tileCol < gameMap[0].length) {
+            const tileType = gameMap[tileRow][tileCol];
+            if (tileType === 1) { // Столкновение с неразрушимым блоком
+                projectiles.splice(i, 1);
+                continue;
+            } else if (tileType === 2) { // Столкновение с разрушаемым блоком
+                gameMap[tileRow][tileCol] = 0; // Разрушаем блок
+                projectiles.splice(i, 1);
+                continue;
+            }
+        }
+
+        // Коллизии снаряда с врагами
+        for (let j = enemies.length - 1; j >= 0; j--) {
+            const enemy = enemies[j];
+            if (p.x < enemy.x + enemy.width &&
+                p.x + p.size > enemy.x &&
+                p.y < enemy.y + enemy.height &&
+                p.y + p.size > enemy.y) {
+                // Столкновение!
+                enemy.health -= p.damage;
+                projectiles.splice(i, 1); // Удаляем снаряд
+                if (enemy.health <= 0) {
+                    enemies.splice(j, 1); // Удаляем врага
+                }
+                break; // Выходим из внутреннего цикла, так как снаряд уже удален
+            }
+        }
+    }
+}
+
+function updateEnemies() {
+    enemies.forEach(enemy => {
+        // Простая логика движения врагов: просто двигаются влево/вправо
+        enemy.x += enemy.dx;
+
+        // Проверка на столкновение с краями платформы или другими блоками
+        const nextX = enemy.x + enemy.dx;
+        const nextTileCol = Math.floor((nextX + (enemy.dx > 0 ? enemy.width : 0)) / TILE_SIZE);
+        const nextTileRow = Math.floor((enemy.y + enemy.height + 1) / TILE_SIZE); // Проверяем плитку под врагом
+
+        if (nextTileRow >= gameMap.length || nextTileCol < 0 || nextTileCol >= gameMap[0].length ||
+            gameMap[nextTileRow][nextTileCol] === 0) { // Если под врагом пусто или он упрется в стену
+            enemy.dx *= -1; // Меняем направление
+        }
+
+        // Коллизия врага с игроком (простой урон)
+        if (player.x < enemy.x + enemy.width &&
+            player.x + player.width > enemy.x &&
+            player.y < enemy.y + enemy.height &&
+            player.y + player.height > enemy.y) {
+            player.health -= 0.5; // Небольшой постоянный урон при контакте
         }
     });
-
-    // Создать границы мира
-    World.add(engine.world, [
-        Bodies.rectangle(canvas.width / 2, canvas.height + 25, canvas.width, 50, { isStatic: true }), // Нижняя граница
-        // ... другие границы
-    ]);
-
-    // Запустить движок
-    Engine.run(engine);
-    Render.run(render);
-
-    // Обработчики событий столкновений
-    Events.on(engine, 'collisionStart', function(event) {
-        const pairs = event.pairs;
-        pairs.forEach(pair => {
-            // Проверка столкновений конфеты со звездами, Ам Нямом, шипами
-            // if (pair.bodyA === candyBody && pair.bodyB.label === 'star') { ... }
-            // if (pair.bodyA === candyBody && pair.bodyB.label === 'omNom') { ... }
-        });
-    });
 }
 
-function createLevelPhysics(levelData) {
-    // Создать тело для конфеты
-    candyBody = Bodies.circle(levelData.candyStart.x, levelData.candyStart.y, candy.radius, {
-        restitution: 0.5, // Упругость
-        density: 0.001,   // Плотность
-        label: 'candy'
-    });
-    World.add(engine.world, candyBody);
+// --- Обработчики событий ---
 
-    // Создать веревки как Constraint
-    ropeConstraints = levelData.ropes.map(r => {
-        const ropeAnchor = Bodies.circle(r.start.x, r.start.y, 5, { isStatic: true, render: { visible: false } }); // Невидимая точка крепления
-        World.add(engine.world, ropeAnchor);
-        const constraint = Constraint.create({
-            bodyA: ropeAnchor,
-            pointB: { x: 0, y: 0 }, // Точка крепления на конфете (относительно центра конфеты)
-            bodyB: candyBody,
-            length: Math.sqrt(Math.pow(r.start.x - r.end.x, 2) + Math.pow(r.start.y - r.end.y, 2)), // Длина веревки
-            stiffness: 1, // Жесткость
-            render: {
-                visible: true,
-                lineWidth: 3,
-                strokeStyle: '#8B4513' // Цвет веревки
-            },
-            label: 'rope'
-        });
-        World.add(engine.world, constraint);
-        return constraint;
-    });
+document.addEventListener('keydown', (e) => {
+    keys[e.code] = true;
+    // Переключение заклинаний
+    if (e.code === 'Digit1') player.currentSpellIndex = 0;
+    if (e.code === 'Digit2') player.currentSpellIndex = 1;
+    if (e.code === 'Digit3') player.currentSpellIndex = 2;
+});
 
-    // Создать тела для звезд, Ам Няма (статические)
-    // ...
-}
-*/
+document.addEventListener('keyup', (e) => {
+    keys[e.code] = false;
+});
 
-// 8. Функция отрисовки (draw)
-function draw() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height); // Очистить Canvas
-
-    // Отрисовка фона (если есть)
-    // ctx.drawImage(backgroundImage, 0, 0, canvas.width, canvas.height);
-
-    // Отрисовка веревок (если не используем Matter.js render)
-    ropes.forEach(rope => {
-        if (!rope.cut) {
-            ctx.beginPath();
-            ctx.moveTo(rope.start.x, rope.start.y);
-            // Если используем Matter.js, то end веревки будет привязана к candyBody
-            // ctx.lineTo(candyBody.position.x, candyBody.position.y);
-            ctx.lineTo(rope.end.x, rope.end.y); // Если без физ. движка, просто рисуем
-            ctx.strokeStyle = '#8B4513'; // Коричневый цвет веревки
-            ctx.lineWidth = 3;
-            ctx.stroke();
-        }
-    });
-
-    // Отрисовка звезд
-    stars.forEach(star => {
-        if (!star.collected) {
-            // ctx.drawImage(star.image, star.x - star.radius, star.y - star.radius, star.radius * 2, star.radius * 2);
-            ctx.fillStyle = 'yellow';
-            ctx.beginPath();
-            ctx.arc(star.x, star.y, star.radius, 0, Math.PI * 2);
-            ctx.fill();
-        }
-    });
-
-    // Отрисовка Ам Няма
-    // ctx.drawImage(omNom.image, omNom.x - omNom.width / 2, omNom.y - omNom.height / 2, omNom.width, omNom.height);
-    ctx.fillStyle = 'green';
-    ctx.beginPath();
-    ctx.arc(omNom.x, omNom.y, omNom.width / 2, 0, Math.PI * 2);
-    ctx.fill();
-
-
-    // Отрисовка конфеты
-    // Если используем Matter.js, то candy.x и candy.y будут обновляться из candyBody.position
-    // ctx.drawImage(candy.image, candy.x - candy.radius, candy.y - candy.radius, candy.radius * 2, candy.radius * 2);
-    ctx.fillStyle = 'red';
-    ctx.beginPath();
-    ctx.arc(candy.x, candy.y, candy.radius, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Отрисовка других элементов (пузыри, шипы и т.д.)
-}
-
-// 9. Игровой цикл (update)
-function gameLoop() {
-    if (!gameRunning) return;
-
-    // Обновление физики (если не Matter.js, то вручную: гравитация, столкновения)
-    // Например, для конфеты:
-    // candy.y += gravity;
-    // Проверка столкновений конфеты с границами, звездами, Ам Нямом
-
-    // Обновление позиций объектов на основе физики (если Matter.js, то Matter.Engine.update делает это)
-    // candy.x = candyBody.position.x;
-    // candy.y = candyBody.position.y;
-
-    // Проверка условий победы/поражения
-    checkGameStatus();
-
-    draw(); // Перерисовка
-    requestAnimationFrame(gameLoop); // Запустить следующий кадр
-}
-
-// 10. Обработка ввода пользователя (разрезание веревок)
 canvas.addEventListener('mousedown', (e) => {
-    if (!gameRunning) return;
+    if (e.button === 0) { // Левая кнопка мыши (стрельба)
+        const spell = player.spells[player.currentSpellIndex];
+        const mouseX = e.clientX - canvas.getBoundingClientRect().left;
+        const mouseY = e.clientY - canvas.getBoundingClientRect().top;
 
-    const mouseX = e.offsetX;
-    const mouseY = e.offsetY;
+        // Вычисляем направление снаряда к курсору мыши
+        const angle = Math.atan2(mouseY - (player.y + player.height / 2), mouseX - (player.x + player.width / 2));
+        const dx = Math.cos(angle) * spell.speed;
+        const dy = Math.sin(angle) * spell.speed;
 
-    // Проверить, пересекает ли линия от предыдущей точки мыши до текущей какую-либо веревку
-    // Это сложная логика, требующая алгоритмов пересечения отрезков.
-    // Для простоты можно проверять, находится ли клик рядом с веревкой.
-    // Или, если используем Matter.js, можно использовать Matter.Query.point для проверки,
-    // попал ли клик на тело веревки (если веревки представлены как тела).
-
-    ropes.forEach(rope => {
-        if (!rope.cut) {
-            // Простая проверка: если клик близко к веревке
-            // Более сложная: алгоритм пересечения отрезка (предыдущая точка мыши - текущая точка мыши) с отрезком веревки
-            const dist = distanceToSegment(mouseX, mouseY, rope.start.x, rope.start.y, rope.end.x, rope.end.y);
-            if (dist < 10) { // Если клик в пределах 10 пикселей от веревки
-                rope.cut = true;
-                // Если Matter.js, удалить соответствующий constraint
-                // World.remove(engine.world, ropeConstraint);
-            }
-        }
-    });
+        projectiles.push({
+            x: player.x + player.width / 2,
+            y: player.y + player.height / 2,
+            dx: dx,
+            dy: dy,
+            damage: spell.damage,
+            color: spell.color,
+            size: spell.size
+        });
+    }
 });
 
-// Вспомогательная функция для расчета расстояния от точки до отрезка
-function distanceToSegment(px, py, x1, y1, x2, y2) {
-    const L2 = (x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1);
-    if (L2 === 0) return Math.sqrt(Math.pow(px - x1, 2) + Math.pow(py - y1, 2));
-    let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / L2;
-    t = Math.max(0, Math.min(1, t));
-    const projectionX = x1 + t * (x2 - x1);
-    const projectionY = y1 + t * (y2 - y1);
-    return Math.sqrt(Math.pow(px - projectionX, 2) + Math.pow(py - projectionY, 2));
-}
+// --- Главный игровой цикл ---
 
-
-// 11. Проверка условий победы/поражения
-function checkGameStatus() {
-    // Проверка столкновения конфеты с Ам Нямом
-    const distToOmNom = Math.sqrt(Math.pow(candy.x - omNom.x, 2) + Math.pow(candy.y - omNom.y, 2));
-    if (distToOmNom < candy.radius + omNom.width / 2 - 10) { // Небольшой допуск
-        if (!gameWon) {
-            gameWon = true;
-            gameRunning = false;
-            displayMessage("Уровень пройден!", "green");
-            document.getElementById('next-level-button').style.display = 'inline-block';
-        }
+function gameLoop() {
+    // Обновление ввода
+    player.dx = 0;
+    if (keys['KeyA']) {
+        player.dx = -player.speed;
+    }
+    if (keys['KeyD']) {
+        player.dx = player.speed;
+    }
+    if (keys['Space'] && player.isGrounded) {
+        player.dy = JUMP_STRENGTH;
+        player.isGrounded = false; // Чтобы нельзя было прыгать в воздухе
     }
 
-    // Проверка столкновения конфеты со звездами
-    stars.forEach(star => {
-        if (!star.collected) {
-            const distToStar = Math.sqrt(Math.pow(candy.x - star.x, 2) + Math.pow(candy.y - star.y, 2));
-            if (distToStar < candy.radius + star.radius) {
-                star.collected = true;
-                starsCollected++;
-                document.getElementById('stars-collected').textContent = starsCollected;
+    // Обновление логики
+    updatePlayer();
+    updateProjectiles();
+    updateEnemies();
+
+    // Очистка канваса
+    ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+    // Отрисовка
+    drawMap();
+    drawPlayer();
+    drawProjectiles();
+    drawEnemies();
+    updateUI();
+
+    // Проверка на конец игры
+    if (player.health <= 0) {
+        alert('Вы погибли! Игра окончена.');
+        // Можно перезагрузить игру или показать экран "Game Over"
+        location.reload();
+        return; // Останавливаем цикл
+    }
+
+    requestAnimationFrame(gameLoop);
+}
+
+// --- Инициализация врагов на основе карты ---
+function initializeEnemiesFromMap() {
+    for (let row = 0; row < gameMap.length; row++) {
+        for (let col = 0; col < gameMap[row].length; col++) {
+            if (gameMap[row][col] === 3) { // Если это стартовая позиция врага
+                enemies.push({
+                    x: col * TILE_SIZE,
+                    y: row * TILE_SIZE,
+                    width: TILE_SIZE,
+                    height: TILE_SIZE,
+                    health: 50,
+                    maxHealth: 50,
+                    dx: 1 // Начальное движение вправо
+                });
+                gameMap[row][col] = 0; // Удаляем маркер врага с карты, чтобы он не был нарисован как блок
             }
         }
-    });
-
-    // Проверка падения конфеты за пределы экрана или столкновения с шипами
-    if (candy.y > canvas.height + 50 || candy.x < -50 || candy.x > canvas.width + 50) {
-        if (!gameLost && !gameWon) { // Чтобы не проиграть после победы
-            gameLost = true;
-            gameRunning = false;
-            displayMessage("Попробуйте снова!", "red");
-        }
     }
-    // Добавить проверку на столкновение с шипами/пауками
 }
 
-// 12. Функции управления кнопками
-document.getElementById('restart-button').addEventListener('click', () => {
-    initLevel(currentLevel);
-    gameLoop(); // Перезапустить игровой цикл
-});
-
-document.getElementById('next-level-button').addEventListener('click', () => {
-    currentLevel++;
-    initLevel(currentLevel);
-    gameLoop(); // Перезапустить игровой цикл
-});
-
-// 13. Функция для отображения сообщений
-function displayMessage(message, color) {
-    const msgDiv = document.getElementById('game-messages');
-    msgDiv.textContent = message;
-    msgDiv.style.color = color;
-}
-
-// 14. Запуск игры
-loadImages(); // Загрузить изображения
-// setupPhysics(); // Инициализировать физический движок
-initLevel(currentLevel); // Инициализировать первый уровень
-gameLoop(); // Запустить игровой цикл
+// Запускаем игру
+initializeEnemiesFromMap();
+gameLoop();
